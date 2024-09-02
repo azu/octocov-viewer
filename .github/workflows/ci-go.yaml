@@ -4,9 +4,11 @@ on:
   push:
     paths:
       - 'go/**'
+      - '.github/workflows/ci-go.yaml'
   pull_request:
     paths:
       - 'go/**'
+      - '.github/workflows/ci-go.yaml'
 
 jobs:
   test:
