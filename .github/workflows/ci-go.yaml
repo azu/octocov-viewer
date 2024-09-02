@@ -2,13 +2,17 @@ name: Go Test
 
 on:
   push:
+    paths:
+      - 'go/**'
   pull_request:
+    paths:
+      - 'go/**'
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-go@v4
         with:
           go-version-file: go.mod
