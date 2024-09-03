@@ -12,15 +12,15 @@ on:
 
 jobs:
   test:
+    permissions:
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v4
         with:
-          go-version-file: go/go.mod
+          go-version-file: go.mod
       - name: Run tests with coverage report output
         run: go test -coverprofile=coverage.out
         working-directory: go/
       - uses: k1LoW/octocov-action@v1.3.0
-        with:
-          work-dir: go/
