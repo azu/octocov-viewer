@@ -24,5 +24,3 @@ jobs:
         run: go test -coverprofile=coverage.out
         working-directory: go/
       - uses: k1LoW/octocov-action@v1.3.0
-        with:
-          work-dir: go/
