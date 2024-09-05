@@ -126,10 +126,9 @@ const getCommitShaInPullRequestFilesPage = (): string | undefined => {
  * @param octocov
  * @param {string} filePath
  * @param {number} lineNumber
- * @param context
  * @return {"covered" | "uncovered" | "unknown"}
  */
-function coverageLineNumber(octocov: Octocov, filePath: string, lineNumber: number, context: PullRequestContext) {
+function coverageLineNumber(octocov: Octocov, filePath: string, lineNumber: number) {
   const targetFile = octocov.coverage.files.find((file) => {
     return file.__relativePathFromRoot__ === filePath;
   });
@@ -177,15 +176,19 @@ function highlightLine(lineElementP: HTMLElement, lineNumber: number, status: "c
  * @param {Element} element
  * @param {string} filePath
  */
-function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string, context: PullRequestContext) {
+function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string) {
   // 2nd column is line number
   const lineElements = Array.from(element.querySelectorAll("tr > [data-line-number]:nth-child(2):not(.blob-num-deletion)")) as HTMLElement[];
   const visibleLines = Array.from(lineElements, (lineElement) => {
     return Number.parseInt(lineElement.dataset.lineNumber, 10);
   });
   const coveredLines = visibleLines.map((lineNumber) => {
-    return coverageLineNumber(octocov, filePath, lineNumber, context);
+    return coverageLineNumber(octocov, filePath, lineNumber);
   });
+  console.log({
+    filePath,
+    coveredLines
+  })
   lineElements.forEach((lineElement, index) => {
     const parentLineElement = lineElement.parentElement;
     const status = coveredLines[index];
@@ -196,13 +199,11 @@ function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string, c
 type OnPullRequestFilesPageResult = {
   status: "marked" | "no-marked" | "not-found" | "error";
 }
-const onPullRequestFilesPage = async (context: PullRequestContext): Promise<OnPullRequestFilesPageResult> => {
+const fetchOctocovJSON = async (context: PullRequestContext): Promise<Octocov | null> => {
   const commitSha = getCommitShaInPullRequestFilesPage();
   if (!commitSha) {
     console.info("Not found commitSha");
-    return {
-      status: "not-found"
-    };
+    return null;
   }
   console.info("commitSha", commitSha);
   const octocovReportUrl = await cacheFn(`${commitSha}:octocovReportUrl`, () => fetchOctocovReportUrl({
@@ -211,65 +212,73 @@ const onPullRequestFilesPage = async (context: PullRequestContext): Promise<OnPu
   }));
   if (!octocovReportUrl) {
     console.info("Not found octocovReportUrl");
-    return {
-      status: "not-found"
-    };
+    return null;
   }
   console.info("octocovReportUrl", octocovReportUrl);
   const octocovJSON = await cacheFn(`${commitSha}:octocovJSON`, () => downloadOctocovReport(octocovReportUrl));
   if (!octocovJSON) {
     console.info("Not found octocovJSON");
-    return {
-      status: "not-found"
-    };
+    return null;
   }
   console.info("octocovJSON", octocovJSON);
-  const targetFileElement = Array.from(document.querySelectorAll("[data-tagsearch-path]")) as HTMLElement[];
-  if (targetFileElement.length === 0) {
-    console.info("Not found target file");
-    return {
-      status: "no-marked"
-    };
-  }
-  const targetFilePaths = Array.from(targetFileElement, (element) => {
-    return element.dataset.tagsearchPath;
-  });
-  targetFilePaths.forEach((filePath, index) => {
-    console.info("highlight filePath", filePath);
-    iterateFile(octocovJSON, targetFileElement[index], filePath, context);
-  });
-  return {
-    status: "marked"
-  };
+  return octocovJSON;
 }
 
 (async function main() {
+  // checked set for file path
   const checkSet = new Set<string>();
-  const onChangeUrl = async () => {
-    if (checkSet.has(location.href)) {
-      return;
+  const highlightElement = (octocovJSON: Octocov) => {
+    const targetFileElement = Array.from(document.querySelectorAll("[data-tagsearch-path]")) as HTMLElement[];
+    if (targetFileElement.length === 0) {
+      console.info("Not found target file");
+      return {
+        status: "no-marked"
+      };
     }
+    const targetFilePaths = Array.from(targetFileElement, (element) => {
+      return element.dataset.tagsearchPath;
+    });
+    targetFilePaths.forEach((filePath, index) => {
+      console.info("highlight filePath", filePath);
+      if (checkSet.has(filePath)) {
+        return;
+      }
+      iterateFile(octocovJSON, targetFileElement[index], filePath);
+      checkSet.add(filePath);
+    });
+    return {
+      status: "marked"
+    };
+  }
+  const fetchOctocovJsonFromPRFile = async () => {
     const url = new URL(location.href);
-    const prMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)/);
+    const prMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)\/files/);
+    console.log({
+      prMatch
+    })
     if (!prMatch) {
       return;
     }
     const { owner, repo, prNumber } = prMatch.groups;
     const context = { owner, repo, prNumber: Number(prNumber) };
-    const result = await onPullRequestFilesPage(context);
-    if (result.status === "marked") {
-      console.info("marked", context);
-      checkSet.add(location.href);
-    }
+    return fetchOctocovJSON(context)
   }
   // initial
-  await onChangeUrl();
+  let octocovJSON: Octocov | null = null;
+  octocovJSON = await fetchOctocovJsonFromPRFile();
+  if (octocovJSON) {
+    console.log("initial highlight", octocovJSON);
+    highlightElement(octocovJSON);
+  }
   // watch url change
   let prevUrl = window.location.href;
   setInterval(async () => {
     if (prevUrl !== window.location.href) {
       prevUrl = window.location.href;
-      await onChangeUrl();
+      octocovJSON = await fetchOctocovJsonFromPRFile();
+    }
+    if (octocovJSON) {
+      highlightElement(octocovJSON);
     }
   }, 1000);
 })();
