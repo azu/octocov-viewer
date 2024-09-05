@@ -30,6 +30,8 @@ jobs:
       # add commit status and url to octocov report.json using github-script
       - name: Add commit status to octocov link
         uses: actions/github-script@v7.0.1
+      # if on push
+        if: github.event_name == 'push'
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -57,3 +59,41 @@ jobs:
               description: 'Octocov Report is available',
               context: 'octocov-report' // this is search keyword for extension
             });
+        # if on pull_request
+      - name: Add check status to octocov link
+        uses: actions/github-script@v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+              // get artifact lists of the workflow
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: context.runId
+              });
+              // get the artifact id of the octocov report
+              const octocovArtifact = artifacts.data.artifacts.find(artifact => artifact.name === 'octocov-report');
+              if(!octocovArtifact) {
+                  console.log('octocov report not found');
+                  return;
+              }
+              // create a check run with the octocov report link
+              const artifactId = octocovArtifact.id;
+              const artifactDownloadUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifactId}`;
+              // Add check run
+              await github.rest.checks.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: 'octocov-report',
+                  head_sha: context.payload.pull_request.head.sha,
+                  status: 'completed',
+                  conclusion: 'success',
+                  output: {
+                      title: 'Octocov Report',
+                      summary: 'Octocov Report is available',
+                      text: 'Octocov Report is available at ' + artifactDownloadUrl
+                      details_url: artifactDownloadUrl
+                  }
+              });
+
