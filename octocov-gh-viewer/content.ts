@@ -7,7 +7,6 @@ export const config: PlasmoCSConfig = {
   matches: ["https://github.com/*"],
   world: "MAIN"
 }
-// https://github.com/azu/octocov-gh-viewer/pull/1
 const storage = {
   get(key: string) {
     const value = sessionStorage.getItem(key);
