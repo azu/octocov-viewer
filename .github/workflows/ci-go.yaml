@@ -90,6 +90,8 @@ jobs:
                   head_sha: context.payload.pull_request.head.sha,
                   status: 'completed',
                   conclusion: 'success',
+                  // details_url is not working with GITHUB_TOKEN
+                  // https://github.com/orgs/community/discussions/26757
                   details_url: artifactDownloadUrl,
                   output: {
                       title: artifactDownloadUrl,
