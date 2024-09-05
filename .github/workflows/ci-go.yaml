@@ -25,6 +25,10 @@ jobs:
         run: go test -coverprofile=coverage.out
         working-directory: go/
       - uses: k1LoW/octocov-action@v1.3.0
+  octocov-report-json:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
       # add commit status and url to octocov report.json using github-script
       - name: Add commit status to octocov link
         uses: actions/github-script@v7.0.1

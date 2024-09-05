@@ -85,7 +85,7 @@ const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
   const artifactUrl = Array.from(statusLinks).find((link) => {
     // "octocov-report-json" is a search keyword
     // user need to set this keyword in the status context
-    const octocovReportStatusContextName = "octocov-report-json";
+    const octocovReportStatusContextName = "octocov-report";
     return link.ariaLabel.includes(octocovReportStatusContextName);
   }) as HTMLAnchorElement | undefined;
   if (!artifactUrl) {
@@ -180,51 +180,68 @@ function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string, c
   });
 }
 
+const onPullRequestFilesPage = async (context: PullRequestContext) => {
+  const commitSha = getCommitShaInPullRequestFilesPage();
+  if (!commitSha) {
+    console.info("Not found commitSha");
+    return;
+  }
+  console.info("commitSha", commitSha);
+  const octocovReportUrl = await cacheFn(`${commitSha}:octocovReportUrl`, () => fetchOctocovReportUrl({
+    context,
+    commitSha,
+  }));
+  if (!octocovReportUrl) {
+    console.info("Not found octocovReportUrl");
+    return;
+  }
+  console.info("octocovReportUrl", octocovReportUrl);
+  const octocovJSON = await cacheFn(`${commitSha}:octocovJSON`, () => downloadOctocovReport(octocovReportUrl));
+  if (!octocovJSON) {
+    console.info("Not found octocovJSON");
+    return;
+  }
+  console.info("octocovJSON", octocovJSON);
+  const targetFileElement = Array.from(document.querySelectorAll("[data-tagsearch-path]")) as HTMLElement[];
+  if (targetFileElement.length === 0) {
+    console.info("Not found target file");
+    return;
+  }
+  const targetFilePaths = Array.from(targetFileElement, (element) => {
+    return element.dataset.tagsearchPath;
+  });
+  targetFilePaths.forEach((filePath, index) => {
+    console.info("highlight filePath", filePath);
+    iterateFile(octocovJSON, targetFileElement[index], filePath, context);
+  });
+}
 
 (async function main() {
-  const url = new URL(location.href);
-  // named capture
-  const prFilesMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)\/files/);
-  // PR diff page
-  if (prFilesMatch) {
-    const { owner, repo, prNumber } = prFilesMatch.groups;
-    const context = {
-      owner,
-      repo,
-      prNumber: Number(prNumber),
+  const onChangeUrl = async () => {
+    const url = new URL(location.href);
+    const prMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)/);
+    if (prMatch) {
+      const { owner, repo, prNumber } = prMatch.groups;
+      const context = { owner, repo, prNumber: Number(prNumber) };
+      await onPullRequestFilesPage(context);
     }
-    const commitSha = getCommitShaInPullRequestFilesPage();
-    if (!commitSha) {
-      console.info("Not found commitSha");
-      return;
-    }
-    console.info("commitSha", commitSha);
-    const octocovReportUrl = await cacheFn(`${commitSha}:octocovReportUrl`, () => fetchOctocovReportUrl({
-      context,
-      commitSha,
-    }));
-    if (!octocovReportUrl) {
-      console.info("Not found octocovReportUrl");
-      return;
-    }
-    console.info("octocovReportUrl", octocovReportUrl);
-    const octocovJSON = await cacheFn(`${commitSha}:octocovJSON`, () => downloadOctocovReport(octocovReportUrl));
-    if (!octocovJSON) {
-      console.info("Not found octocovJSON");
-      return;
-    }
-    console.info("octocovJSON", octocovJSON);
-    const targetFileElement = Array.from(document.querySelectorAll("[data-tagsearch-path]")) as HTMLElement[];
-    if (targetFileElement.length === 0) {
-      console.info("Not found target file");
-      return;
-    }
-    const targetFilePaths = Array.from(targetFileElement, (element) => {
-      return element.dataset.tagsearchPath;
+  }
+  // @ts-expect-error -- all browser is not support yet
+  if (window.navigation) {
+    // @ts-expect-error -- all browser is not support yet
+    window.navigation.addEventListener("navigate", async () => {
+      await onChangeUrl();
     });
-    targetFilePaths.forEach((filePath, index) => {
-      console.info("highlight filePath", filePath);
-      iterateFile(octocovJSON, targetFileElement[index], filePath, context);
-    });
+  } else {
+    // initial
+    await onChangeUrl();
+    // watch url change
+    let prevUrl = window.location.href;
+    setInterval(async () => {
+      if (prevUrl !== window.location.href) {
+        prevUrl = window.location.href;
+        await onChangeUrl();
+      }
+    }, 1000);
   }
 })();
