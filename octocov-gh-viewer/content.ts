@@ -121,12 +121,6 @@ const getCommitShaInPullRequestFilesPage = (): string | undefined => {
   return commits.at(-1);
 }
 
-// Diff Page
-const normalizeFilePath = (path: string, context: PullRequestContext) => {
-  // "github.com/azu/octocov-gh-viewer/go/hello.go" -> "go/hello.go"
-  return path.replace(`github.com/${context.owner}/${context.repo}/`, "");
-}
-
 /**
  *
  * @param octocov
@@ -137,7 +131,7 @@ const normalizeFilePath = (path: string, context: PullRequestContext) => {
  */
 function coverageLineNumber(octocov: Octocov, filePath: string, lineNumber: number, context: PullRequestContext) {
   const targetFile = octocov.coverage.files.find((file) => {
-    return normalizeFilePath(file.file, context) === filePath;
+    return file.__relativePathFromRoot__ === filePath;
   });
   if (!targetFile) {
     return "unknown";

@@ -21,6 +21,9 @@ export type OctocovFile = {
   total: number;
   covered: number;
   blocks: OctocovBlock[];
+
+  // extension: relative path from root of the repository
+  __relativePathFromRoot__: string;
 }
 
 export type OctocovBlock = {
