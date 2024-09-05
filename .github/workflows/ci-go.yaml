@@ -2,6 +2,8 @@ name: Go Test
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'go/**'
       - '.github/workflows/ci-go.yaml'
@@ -15,6 +17,7 @@ jobs:
     permissions:
       pull-requests: write
       statuses: write
+      checks: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,27 +27,40 @@ jobs:
       - name: Run tests with coverage report output
         run: go test -coverprofile=coverage.out
         working-directory: go/
-      - uses: k1LoW/octocov-action@v1.3.0
+      - uses: k1LoW/octocov-action@v1.3.0 # upload "octocov-report"
+      - uses: actions/download-artifact@v4
+        with:
+          name: octocov-report # report.json
+      # modify octocov-report.json and upload it as octocov-report-viewer.json
+      - name: Create octocov-report-viewer
+        uses: actions/github-script@v7.0.1
+        with:
+          script: |
+            const fs = require('node:fs');
+            const report = require('./report.json');
+            // .coverage.files.file replace "github.com/azu/octocov-gh-viewer" -> ""
+            report.coverage.files.forEach((file) => {
+              // path/to/file.go
+              file.__relativePathFromRoot__ = file.file.replace("github.com/azu/octocov-gh-viewer/", "");
+            });
+            fs.writeFileSync('./octocov-report-viewer.json', JSON.stringify(report, null, 2));
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        id: octocov-report-viewer
+        with:
+          name: octocov-report-viewer
+          path: octocov-report-viewer.json
       # add commit status and url to octocov report.json using github-script
       - name: Add commit status to octocov link
         uses: actions/github-script@v7.0.1
+      # if on push
+        if: github.event_name == 'push'
+        env:
+          ARTIFACT_ID: ${{ steps.octocov-report-viewer.outputs.artifact-id }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // get artifact lists of the workflow
-            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId
-            });
-            // get the artifact id of the octocov report
-            const octocovArtifact = artifacts.data.artifacts.find(artifact => artifact.name === 'octocov-report');
-            if(!octocovArtifact) {
-              console.log('octocov report not found');
-              return;
-            }
-            // create a commit status with the octocov report link
-            const artifactId = octocovArtifact.id;
+            const artifactId = process.env.ARTIFACT_ID;
             const artifactDownloadUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifactId}`;
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
@@ -53,5 +69,35 @@ jobs:
               state: 'success',
               target_url: artifactDownloadUrl,
               description: 'Octocov Report is available',
-              context: 'octocov-report'
+              context: 'octocov-report' // this is search keyword for extension
             });
+        # if on pull_request
+      - name: Add check status to octocov link
+        uses: actions/github-script@v7.0.1
+        if: github.event_name == 'pull_request'
+        env:
+          ARTIFACT_ID: ${{ steps.octocov-report-viewer.outputs.artifact-id }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+              const artifactId = process.env.ARTIFACT_ID;
+              const artifactDownloadUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifactId}`;
+              // Add check run
+              await github.rest.checks.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: 'octocov-report',
+                  head_sha: context.payload.pull_request.head.sha,
+                  status: 'completed',
+                  conclusion: 'success',
+                  // details_url is not working with GITHUB_TOKEN
+                  // https://github.com/orgs/community/discussions/26757
+                  details_url: artifactDownloadUrl,
+                  output: {
+                      title: artifactDownloadUrl,
+                      summary: 'Octocov Report is available',
+                      text: 'Octocov Report is available at ' + artifactDownloadUrl,
+                      annotations_url: artifactDownloadUrl
+                  }
+              });
+

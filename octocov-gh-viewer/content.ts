@@ -73,7 +73,9 @@ const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
   // e.g. https://github.com/azu/octocov-gh-viewer/commit/178c452f4136e7019129a39be8186157892882e9/status-details
   // extract status details and get artifact url
   const { owner, repo, prNumber } = options.context
-  const statusDetailsUrlFragmentRes = await fetch(`https://github.com/${owner}/${repo}/commit/${options.commitSha}/status-details`, {
+  const checkFragmentUrl = `https://github.com/${owner}/${repo}/commit/${options.commitSha}/status-details`;
+  console.info("checkFragmentUrl", checkFragmentUrl);
+  const statusDetailsUrlFragmentRes = await fetch(checkFragmentUrl, {
     headers: {
       accept: "text/html",
       "X-Requested-With": "XMLHttpRequest" // This is required to get the status details page
@@ -81,18 +83,35 @@ const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
   });
   const parser = new DOMParser();
   const statusDetailsHTML = parser.parseFromString(await statusDetailsUrlFragmentRes.text(), "text/html");
-  const statusLinks = statusDetailsHTML.querySelectorAll(".status-actions[href]");
+  const octocovReportStatusContextName = "octocov-report";
+  // Get Artifact URL from Commit Status Link
+  const statusLinks = statusDetailsHTML.querySelectorAll<HTMLAnchorElement>(".status-actions[href]");
+  // https://github.com/azu/octocov-gh-viewer/actions/runs/10713070183/artifacts/1894254504
+  const artifactUrlPattern = /https:\/\/github.com\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/actions\/runs\/(?<runId>\d+)\/artifacts\/(?<artifactId>\d+)/;
   const artifactUrl = Array.from(statusLinks).find((link) => {
     // "octocov-report" is a search keyword
     // user need to set this keyword in the status context
-    const octocovReportStatusContextName = "octocov-report";
-    return link.ariaLabel.includes(octocovReportStatusContextName);
+    return link.ariaLabel.includes(octocovReportStatusContextName) && artifactUrlPattern.test(link.href);
   }) as HTMLAnchorElement | undefined;
-  if (!artifactUrl) {
-    console.info("Not found artifact url");
-    return;
+  if (artifactUrl) {
+    return artifactUrl.href;
   }
-  return artifactUrl.href
+  // Get Artifact URL from Pull Request Check
+  if (!artifactUrl) {
+    const checkSuites = statusDetailsHTML.querySelectorAll(".merge-status-item ");
+    for (const checkSuite of Array.from(checkSuites)) {
+      const textContent = checkSuite.textContent;
+      if (!textContent.includes(octocovReportStatusContextName)) {
+        continue;
+      }
+      const match = checkSuite.textContent.match(artifactUrlPattern);
+      if (match) {
+        return match[0];
+      }
+    }
+  }
+  console.info("Not found artifact url");
+  return undefined;
 }
 
 const getCommitShaInPullRequestFilesPage = (): string | undefined => {
@@ -180,51 +199,83 @@ function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string, c
   });
 }
 
+type OnPullRequestFilesPageResult = {
+  status: "marked" | "no-marked" | "not-found" | "error";
+}
+const onPullRequestFilesPage = async (context: PullRequestContext): Promise<OnPullRequestFilesPageResult> => {
+  const commitSha = getCommitShaInPullRequestFilesPage();
+  if (!commitSha) {
+    console.info("Not found commitSha");
+    return {
+      status: "not-found"
+    };
+  }
+  console.info("commitSha", commitSha);
+  const octocovReportUrl = await cacheFn(`${commitSha}:octocovReportUrl`, () => fetchOctocovReportUrl({
+    context,
+    commitSha,
+  }));
+  if (!octocovReportUrl) {
+    console.info("Not found octocovReportUrl");
+    return {
+      status: "not-found"
+    };
+  }
+  console.info("octocovReportUrl", octocovReportUrl);
+  const octocovJSON = await cacheFn(`${commitSha}:octocovJSON`, () => downloadOctocovReport(octocovReportUrl));
+  if (!octocovJSON) {
+    console.info("Not found octocovJSON");
+    return {
+      status: "not-found"
+    };
+  }
+  console.info("octocovJSON", octocovJSON);
+  const targetFileElement = Array.from(document.querySelectorAll("[data-tagsearch-path]")) as HTMLElement[];
+  if (targetFileElement.length === 0) {
+    console.info("Not found target file");
+    return {
+      status: "no-marked"
+    };
+  }
+  const targetFilePaths = Array.from(targetFileElement, (element) => {
+    return element.dataset.tagsearchPath;
+  });
+  targetFilePaths.forEach((filePath, index) => {
+    console.info("highlight filePath", filePath);
+    iterateFile(octocovJSON, targetFileElement[index], filePath, context);
+  });
+  return {
+    status: "marked"
+  };
+}
 
 (async function main() {
-  const url = new URL(location.href);
-  // named capture
-  const prFilesMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)\/files/);
-  // PR diff page
-  if (prFilesMatch) {
-    const { owner, repo, prNumber } = prFilesMatch.groups;
-    const context = {
-      owner,
-      repo,
-      prNumber: Number(prNumber),
-    }
-    const commitSha = getCommitShaInPullRequestFilesPage();
-    if (!commitSha) {
-      console.info("Not found commitSha");
+  const checkSet = new Set<string>();
+  const onChangeUrl = async () => {
+    if (checkSet.has(location.href)) {
       return;
     }
-    console.info("commitSha", commitSha);
-    const octocovReportUrl = await cacheFn(`${commitSha}:octocovReportUrl`, () => fetchOctocovReportUrl({
-      context,
-      commitSha,
-    }));
-    if (!octocovReportUrl) {
-      console.info("Not found octocovReportUrl");
+    const url = new URL(location.href);
+    const prMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)/);
+    if (!prMatch) {
       return;
     }
-    console.info("octocovReportUrl", octocovReportUrl);
-    const octocovJSON = await cacheFn(`${commitSha}:octocovJSON`, () => downloadOctocovReport(octocovReportUrl));
-    if (!octocovJSON) {
-      console.info("Not found octocovJSON");
-      return;
+    const { owner, repo, prNumber } = prMatch.groups;
+    const context = { owner, repo, prNumber: Number(prNumber) };
+    const result = await onPullRequestFilesPage(context);
+    if (result.status === "marked") {
+      console.info("marked", context);
+      checkSet.add(location.href);
     }
-    console.info("octocovJSON", octocovJSON);
-    const targetFileElement = Array.from(document.querySelectorAll("[data-tagsearch-path]")) as HTMLElement[];
-    if (targetFileElement.length === 0) {
-      console.info("Not found target file");
-      return;
-    }
-    const targetFilePaths = Array.from(targetFileElement, (element) => {
-      return element.dataset.tagsearchPath;
-    });
-    targetFilePaths.forEach((filePath, index) => {
-      console.info("highlight filePath", filePath);
-      iterateFile(octocovJSON, targetFileElement[index], filePath, context);
-    });
   }
+  // initial
+  await onChangeUrl();
+  // watch url change
+  let prevUrl = window.location.href;
+  setInterval(async () => {
+    if (prevUrl !== window.location.href) {
+      prevUrl = window.location.href;
+      await onChangeUrl();
+    }
+  }, 1000);
 })();
