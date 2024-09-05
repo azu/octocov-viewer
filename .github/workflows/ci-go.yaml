@@ -55,5 +55,5 @@ jobs:
               state: 'success',
               target_url: artifactDownloadUrl,
               description: 'Octocov Report is available',
-              context: 'octocov-report-json' // this is search keyword for extension
+              context: 'octocov-report' // this is search keyword for extension
             });
