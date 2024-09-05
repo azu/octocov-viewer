@@ -73,7 +73,9 @@ const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
   // e.g. https://github.com/azu/octocov-gh-viewer/commit/178c452f4136e7019129a39be8186157892882e9/status-details
   // extract status details and get artifact url
   const { owner, repo, prNumber } = options.context
-  const statusDetailsUrlFragmentRes = await fetch(`https://github.com/${owner}/${repo}/commit/${options.commitSha}/status-details`, {
+  const checkFragmentUrl = `https://github.com/${owner}/${repo}/commit/${options.commitSha}/status-details`;
+  console.info("checkFragmentUrl", checkFragmentUrl);
+  const statusDetailsUrlFragmentRes = await fetch(checkFragmentUrl, {
     headers: {
       accept: "text/html",
       "X-Requested-With": "XMLHttpRequest" // This is required to get the status details page
@@ -82,21 +84,21 @@ const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
   const parser = new DOMParser();
   const statusDetailsHTML = parser.parseFromString(await statusDetailsUrlFragmentRes.text(), "text/html");
   const octocovReportStatusContextName = "octocov-report";
-  // Commit Status Link:
-  const statusLinks = statusDetailsHTML.querySelectorAll(".status-actions[href]");
+  // Get Artifact URL from Commit Status Link
+  const statusLinks = statusDetailsHTML.querySelectorAll<HTMLAnchorElement>(".status-actions[href]");
+  // https://github.com/azu/octocov-gh-viewer/actions/runs/10713070183/artifacts/1894254504
+  const artifactUrlPattern = /https:\/\/github.com\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/actions\/runs\/(?<runId>\d+)\/artifacts\/(?<artifactId>\d+)/;
   const artifactUrl = Array.from(statusLinks).find((link) => {
     // "octocov-report" is a search keyword
     // user need to set this keyword in the status context
-    return link.ariaLabel.includes(octocovReportStatusContextName);
+    return link.ariaLabel.includes(octocovReportStatusContextName) && artifactUrlPattern.test(link.href);
   }) as HTMLAnchorElement | undefined;
   if (artifactUrl) {
     return artifactUrl.href;
   }
-  // Pull Request Check:
+  // Get Artifact URL from Pull Request Check
   if (!artifactUrl) {
     const checkSuites = statusDetailsHTML.querySelectorAll(".merge-status-item ");
-    // https://github.com/azu/octocov-gh-viewer/actions/runs/10713070183/artifacts/1894254504
-    const artifactUrlPattern = /https:\/\/github.com\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/actions\/runs\/(?<runId>\d+)\/artifacts\/(?<artifactId>\d+)/;
     for (const checkSuite of Array.from(checkSuites)) {
       const textContent = checkSuite.textContent;
       if (!textContent.includes(octocovReportStatusContextName)) {

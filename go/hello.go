@@ -9,8 +9,8 @@ import (
 func Hello(name string) (string, error) {
 	// If no name was given, return an error with a message.
 	if name == "" {
-		return name, errors.New("empty name test")
+		return name, errors.New("empty name")
 	}
-	message := fmt.Sprintf("Hello %s test", name)
+	message := fmt.Sprintf("Hello %s", name)
 	return message, nil
 }
