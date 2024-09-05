@@ -2,6 +2,8 @@ name: Go Test
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'go/**'
       - '.github/workflows/ci-go.yaml'
