@@ -41,7 +41,7 @@ jobs:
             // .coverage.files.file replace "github.com/azu/octocov-gh-viewer" -> ""
             report.coverage.files.forEach((file) => {
               // path/to/file.go
-              file.__relativePathFromRoot__ = file.file.replace("github.com/azu/octocov-gh-viewer", "");
+              file.__relativePathFromRoot__ = file.file.replace("github.com/azu/octocov-gh-viewer/", "");
             });
             fs.writeFileSync('./octocov-report-viewer.json', JSON.stringify(report, null, 2));
       - name: Upload Artifact
