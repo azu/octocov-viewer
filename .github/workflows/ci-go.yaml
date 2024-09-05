@@ -31,7 +31,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: octocov-report # report.json
-      # modify octocov-report to
+      # modify octocov-report.json and upload it as octocov-report-viewer.json
       - name: Create octocov-report-viewer
         uses: actions/github-script@v7.0.1
         with:
