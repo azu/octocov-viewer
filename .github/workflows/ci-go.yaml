@@ -38,7 +38,7 @@ jobs:
               run_id: context.runId
             });
             // get the artifact id of the octocov report
-            const octocovArtifact = artifacts.data.artifacts.find(artifact => artifact.name === 'octocov-report');
+            const octocovArtifact = artifacts.data.artifacts.find(artifact => artifact.name === 'octocov-report-json');
             if(!octocovArtifact) {
               console.log('octocov report not found');
               return;
@@ -53,5 +53,5 @@ jobs:
               state: 'success',
               target_url: artifactDownloadUrl,
               description: 'Octocov Report is available',
-              context: 'octocov-report'
+              context: 'octocov-report-json' // this is search keyword for extension
             });

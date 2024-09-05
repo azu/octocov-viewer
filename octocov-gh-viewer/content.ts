@@ -83,9 +83,9 @@ const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
   const statusDetailsHTML = parser.parseFromString(await statusDetailsUrlFragmentRes.text(), "text/html");
   const statusLinks = statusDetailsHTML.querySelectorAll(".status-actions[href]");
   const artifactUrl = Array.from(statusLinks).find((link) => {
-    // "octocov-report" is a search keyword
+    // "octocov-report-json" is a search keyword
     // user need to set this keyword in the status context
-    const octocovReportStatusContextName = "octocov-report";
+    const octocovReportStatusContextName = "octocov-report-json";
     return link.ariaLabel.includes(octocovReportStatusContextName);
   }) as HTMLAnchorElement | undefined;
   if (!artifactUrl) {
