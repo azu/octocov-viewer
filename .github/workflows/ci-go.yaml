@@ -92,9 +92,10 @@ jobs:
                   conclusion: 'success',
                   details_url: artifactDownloadUrl,
                   output: {
-                      title: 'Octocov Report',
+                      title: artifactDownloadUrl,
                       summary: 'Octocov Report is available',
-                      text: 'Octocov Report is available at ' + artifactDownloadUrl
+                      text: 'Octocov Report is available at ' + artifactDownloadUrl,
+                      annotations_url: artifactDownloadUrl
                   }
               });
 
