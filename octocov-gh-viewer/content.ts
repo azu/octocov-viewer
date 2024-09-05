@@ -199,11 +199,16 @@ function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string, c
   });
 }
 
-const onPullRequestFilesPage = async (context: PullRequestContext) => {
+type OnPullRequestFilesPageResult = {
+  status: "marked" | "no-marked" | "not-found" | "error";
+}
+const onPullRequestFilesPage = async (context: PullRequestContext): Promise<OnPullRequestFilesPageResult> => {
   const commitSha = getCommitShaInPullRequestFilesPage();
   if (!commitSha) {
     console.info("Not found commitSha");
-    return;
+    return {
+      status: "not-found"
+    };
   }
   console.info("commitSha", commitSha);
   const octocovReportUrl = await cacheFn(`${commitSha}:octocovReportUrl`, () => fetchOctocovReportUrl({
@@ -212,19 +217,25 @@ const onPullRequestFilesPage = async (context: PullRequestContext) => {
   }));
   if (!octocovReportUrl) {
     console.info("Not found octocovReportUrl");
-    return;
+    return {
+      status: "not-found"
+    };
   }
   console.info("octocovReportUrl", octocovReportUrl);
   const octocovJSON = await cacheFn(`${commitSha}:octocovJSON`, () => downloadOctocovReport(octocovReportUrl));
   if (!octocovJSON) {
     console.info("Not found octocovJSON");
-    return;
+    return {
+      status: "not-found"
+    };
   }
   console.info("octocovJSON", octocovJSON);
   const targetFileElement = Array.from(document.querySelectorAll("[data-tagsearch-path]")) as HTMLElement[];
   if (targetFileElement.length === 0) {
     console.info("Not found target file");
-    return;
+    return {
+      status: "no-marked"
+    };
   }
   const targetFilePaths = Array.from(targetFileElement, (element) => {
     return element.dataset.tagsearchPath;
@@ -233,34 +244,38 @@ const onPullRequestFilesPage = async (context: PullRequestContext) => {
     console.info("highlight filePath", filePath);
     iterateFile(octocovJSON, targetFileElement[index], filePath, context);
   });
+  return {
+    status: "marked"
+  };
 }
 
 (async function main() {
+  const checkSet = new Set<string>();
   const onChangeUrl = async () => {
+    if (checkSet.has(location.href)) {
+      return;
+    }
     const url = new URL(location.href);
     const prMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)/);
-    if (prMatch) {
-      const { owner, repo, prNumber } = prMatch.groups;
-      const context = { owner, repo, prNumber: Number(prNumber) };
-      await onPullRequestFilesPage(context);
+    if (!prMatch) {
+      return;
+    }
+    const { owner, repo, prNumber } = prMatch.groups;
+    const context = { owner, repo, prNumber: Number(prNumber) };
+    const result = await onPullRequestFilesPage(context);
+    if (result.status === "marked") {
+      console.info("marked", context);
+      checkSet.add(location.href);
     }
   }
-  // @ts-expect-error -- all browser is not support yet
-  if (window.navigation) {
-    // @ts-expect-error -- all browser is not support yet
-    window.navigation.addEventListener("navigate", async () => {
+  // initial
+  await onChangeUrl();
+  // watch url change
+  let prevUrl = window.location.href;
+  setInterval(async () => {
+    if (prevUrl !== window.location.href) {
+      prevUrl = window.location.href;
       await onChangeUrl();
-    });
-  } else {
-    // initial
-    await onChangeUrl();
-    // watch url change
-    let prevUrl = window.location.href;
-    setInterval(async () => {
-      if (prevUrl !== window.location.href) {
-        prevUrl = window.location.href;
-        await onChangeUrl();
-      }
-    }, 1000);
-  }
+    }
+  }, 1000);
 })();
