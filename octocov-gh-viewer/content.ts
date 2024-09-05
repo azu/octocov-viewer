@@ -81,18 +81,35 @@ const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
   });
   const parser = new DOMParser();
   const statusDetailsHTML = parser.parseFromString(await statusDetailsUrlFragmentRes.text(), "text/html");
+  const octocovReportStatusContextName = "octocov-report";
+  // Commit Status Link:
   const statusLinks = statusDetailsHTML.querySelectorAll(".status-actions[href]");
   const artifactUrl = Array.from(statusLinks).find((link) => {
     // "octocov-report" is a search keyword
     // user need to set this keyword in the status context
-    const octocovReportStatusContextName = "octocov-report";
     return link.ariaLabel.includes(octocovReportStatusContextName);
   }) as HTMLAnchorElement | undefined;
-  if (!artifactUrl) {
-    console.info("Not found artifact url");
-    return;
+  if (artifactUrl) {
+    return artifactUrl.href;
   }
-  return artifactUrl.href
+  // Pull Request Check:
+  if (!artifactUrl) {
+    const checkSuites = statusDetailsHTML.querySelectorAll(".merge-status-item ");
+    // https://github.com/azu/octocov-gh-viewer/actions/runs/10713070183/artifacts/1894254504
+    const artifactUrlPattern = /https:\/\/github.com\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/actions\/runs\/(?<runId>\d+)\/artifacts\/(?<artifactId>\d+)/;
+    for (const checkSuite of Array.from(checkSuites)) {
+      const textContent = checkSuite.textContent;
+      if (!textContent.includes(octocovReportStatusContextName)) {
+        continue;
+      }
+      const match = checkSuite.textContent.match(artifactUrlPattern);
+      if (match) {
+        return match[0];
+      }
+    }
+  }
+  console.info("Not found artifact url");
+  return undefined;
 }
 
 const getCommitShaInPullRequestFilesPage = (): string | undefined => {
