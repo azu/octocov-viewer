@@ -52,6 +52,6 @@ jobs:
               sha: context.sha,
               state: 'success',
               target_url: artifactDownloadUrl,
-              description: 'octocov report',
-              context: 'octocov'
+              description: 'Octocov Report is available',
+              context: 'octocov-report'
             });
