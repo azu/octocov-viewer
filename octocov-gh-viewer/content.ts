@@ -7,7 +7,6 @@ export const config: PlasmoCSConfig = {
   matches: ["https://github.com/*"],
   world: "MAIN"
 }
-// https://github.com/azu/octocov-gh-viewer/pull/1
 const storage = {
   get(key: string) {
     const value = sessionStorage.getItem(key);
@@ -18,7 +17,7 @@ const storage = {
   },
 }
 type JSONValue = string | number | boolean | null | { [key: string]: JSONValue } | JSONValue[] | Octocov;
-const cacheFn = async (key: string, fn: () => JSONValue | Promise<JSONValue>) => {
+const cacheFn = async <R extends JSONValue | Octocov>(key: string, fn: () => Promise<R>): Promise<R> => {
   const value = storage.get(key)
   if (value) {
     return value
@@ -41,61 +40,13 @@ type OnPullRequestPageOptions = {
   coverageWorkflowPattern: RegExp;
   artifactNamePattern: RegExp;
 }
-const fetchWorkflowId = async (options: OnPullRequestPageOptions) => {
-  const { owner, repo, prNumber } = options.context
-  // fetch /pull/<num>/checks page
-  const checkRes = await fetch(`https://github.com/${owner}/${repo}/pull/${prNumber}/checks`);
-  const parser = new DOMParser();
-  const checkResHTML = parser.parseFromString(await checkRes.text(), "text/html");
-  // hrefに　/run/<workflowid> を含むリンクを取得
-  const workflowLinks = Array.from(checkResHTML.querySelectorAll("a")).filter(a => {
-    return a.href.includes("/runs/");
-  });
-  const workflowLink = workflowLinks.find(a => options.coverageWorkflowPattern.test(a.textContent));
-  if (!workflowLink) {
-    console.info("Not found coverage workflow link");
-    return;
-  }
-  // get <workflowid>
-  const match = workflowLink.href.match(/\/runs\/(\d+)/);
-  return match?.[1];
-}
-type ArtifactOptions = {
-  context: PullRequestContext;
-  workflowId: string;
-  artifactNamePattern: RegExp;
-}
-const fetchArtifactId = async (options: ArtifactOptions) => {
-  const { owner, repo, prNumber } = options.context
-  const { workflowId } = options
-  // fetch /run/<workflowid> page
-  const runRes = await fetch(`https://github.com/${owner}/${repo}/actions/runs/${workflowId}`);
-  const parser = new DOMParser();
-  const runResHTML = parser.parseFromString(await runRes.text(), "text/html");
-  // artifact link: /runs/<workflowid>/artifacts/<artifactid>
-  const artifactLinks = Array.from(runResHTML.querySelectorAll("a")).filter(a => {
-    return a.href.includes(`/artifacts/`);
-  });
-  const artifactLink = artifactLinks.find(a => options.artifactNamePattern.test(a.textContent));
-  if (!artifactLink) {
-    console.info("Not found coverage artifact link");
-    return;
-  }
-  const match = artifactLink.href.match(/\/artifacts\/(\d+)/);
-  return match?.[1];
-}
-type DownloadArtifactOptions = {
-  context: PullRequestContext;
-  workflowId: string;
-  artifactId: string;
-}
-const downloadArtifact = async (options: DownloadArtifactOptions) => {
-  const { owner, repo } = options.context
-  const { workflowId, artifactId } = options
-  // it will be redirect to actual blob url
-  const artifactDownloadUrl = `https://github.com/${owner}/${repo}/actions/runs/${workflowId}/artifacts/${artifactId}`;
-  console.info("artifactDownloadUrl", artifactDownloadUrl);
-  const downloadRes = await fetch(artifactDownloadUrl, {
+/**
+ * Download Octocov report and extract it and parse it
+ * Return Octocov JSON
+ * @param octocovReportUrl
+ */
+const downloadOctocovReport = async (octocovReportUrl: string): Promise<Octocov> => {
+  const downloadRes = await fetch(octocovReportUrl, {
     method: "HEAD",
   });
   const finalBlobUrl = downloadRes.url;
@@ -114,48 +65,42 @@ const downloadArtifact = async (options: DownloadArtifactOptions) => {
   }
 }
 
-const onPullRequestPage = async (options: OnPullRequestPageOptions) => {
-  const baseKey = `${options.context.owner}/${options.context.repo}/${options.context.prNumber}`;
-  const workflowIdCacheKey = `${baseKey}:workflowId`
-  console.info("start fetchWorkflowId");
-  const workflowId = await cacheFn(workflowIdCacheKey, () => fetchWorkflowId(options));
-  if (!workflowId) {
-    console.info("Not found coverage workflow");
+type OnCommitShaOptions = {
+  context: PullRequestContext;
+  commitSha: string;
+}
+const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
+  // e.g. https://github.com/azu/octocov-gh-viewer/commit/178c452f4136e7019129a39be8186157892882e9/status-details
+  // extract status details and get artifact url
+  const { owner, repo, prNumber } = options.context
+  const statusDetailsUrlFragmentRes = await fetch(`https://github.com/${owner}/${repo}/commit/${options.commitSha}/status-details`, {
+    headers: {
+      accept: "text/html",
+      "X-Requested-With": "XMLHttpRequest" // This is required to get the status details page
+    }
+  });
+  const parser = new DOMParser();
+  const statusDetailsHTML = parser.parseFromString(await statusDetailsUrlFragmentRes.text(), "text/html");
+  const statusLinks = statusDetailsHTML.querySelectorAll(".status-actions[href]");
+  const artifactUrl = Array.from(statusLinks).find((link) => {
+    // "octocov-report" is a search keyword
+    // user need to set this keyword in the status context
+    const octocovReportStatusContextName = "octocov-report";
+    return link.ariaLabel.includes(octocovReportStatusContextName);
+  }) as HTMLAnchorElement | undefined;
+  if (!artifactUrl) {
+    console.info("Not found artifact url");
     return;
   }
-  console.info("workflowId", workflowId);
-  // artifact
-  console.info("start fetchArtifactId");
-  const artifactIdCacheKey = `${baseKey}:artifactId`
-  const artifactId = await cacheFn(artifactIdCacheKey, () => fetchArtifactId({
-    context: options.context,
-    workflowId,
-    artifactNamePattern: options.artifactNamePattern,
-  }));
-  if (!artifactId) {
-    console.info("Not found coverage artifact");
-    return;
-  }
-  console.info("artifactId", artifactId);
-  // download
-  console.info("start downloadArtifact");
-  const artifactFileCacheKey = `${baseKey}:artifactFile`
-  const octocovJSON = await cacheFn(artifactFileCacheKey, () => downloadArtifact({
-    context: options.context,
-    workflowId,
-    artifactId,
-  }));
-  if (!octocovJSON) {
-    console.info("Not found coverage artifact file");
-    return;
-  }
-  console.info("octocovJSON", octocovJSON);
-  return {
-    workflowId,
-    artifactId,
-    octocovJSON
-  }
-};
+  return artifactUrl.href
+}
+
+const getCommitShaInPullRequestFilesPage = (): string | undefined => {
+  const commits = Array.from(document.querySelectorAll("[data-commit]"), (e: HTMLElement) => {
+    return e.dataset.commit
+  });
+  return commits.at(-1);
+}
 
 // Diff Page
 const normalizeFilePath = (path: string, context: PullRequestContext) => {
@@ -235,25 +180,40 @@ function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string, c
   });
 }
 
+
 (async function main() {
   const url = new URL(location.href);
   // named capture
-  const prMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)/);
   const prFilesMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)\/files/);
-  // diff page
+  // PR diff page
   if (prFilesMatch) {
-    const { owner, repo, prNumber } = prMatch.groups;
+    const { owner, repo, prNumber } = prFilesMatch.groups;
     const context = {
       owner,
       repo,
       prNumber: Number(prNumber),
     }
-    const result = await onPullRequestPage({
+    const commitSha = getCommitShaInPullRequestFilesPage();
+    if (!commitSha) {
+      console.info("Not found commitSha");
+      return;
+    }
+    console.info("commitSha", commitSha);
+    const octocovReportUrl = await cacheFn(`${commitSha}:octocovReportUrl`, () => fetchOctocovReportUrl({
       context,
-      coverageWorkflowPattern: /Go Test/i,
-      artifactNamePattern: /octocov/i,
-    });
-    const octocov = result.octocovJSON;
+      commitSha,
+    }));
+    if (!octocovReportUrl) {
+      console.info("Not found octocovReportUrl");
+      return;
+    }
+    console.info("octocovReportUrl", octocovReportUrl);
+    const octocovJSON = await cacheFn(`${commitSha}:octocovJSON`, () => downloadOctocovReport(octocovReportUrl));
+    if (!octocovJSON) {
+      console.info("Not found octocovJSON");
+      return;
+    }
+    console.info("octocovJSON", octocovJSON);
     const targetFileElement = Array.from(document.querySelectorAll("[data-tagsearch-path]")) as HTMLElement[];
     if (targetFileElement.length === 0) {
       console.info("Not found target file");
@@ -264,20 +224,7 @@ function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string, c
     });
     targetFilePaths.forEach((filePath, index) => {
       console.info("highlight filePath", filePath);
-      iterateFile(octocov, targetFileElement[index], filePath, context);
+      iterateFile(octocovJSON, targetFileElement[index], filePath, context);
     });
-  } else if (prMatch) {
-    // pr page - fetch and cache
-    const { owner, repo, prNumber } = prMatch.groups;
-    const result = await onPullRequestPage({
-      context: {
-        owner,
-        repo,
-        prNumber: Number(prNumber),
-      },
-      coverageWorkflowPattern: /Go Test/i,
-      artifactNamePattern: /octocov/i,
-    });
-    console.info("result", result);
   }
 })();
