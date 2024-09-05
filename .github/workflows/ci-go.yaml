@@ -40,7 +40,7 @@ jobs:
               run_id: context.runId
             });
             // get the artifact id of the octocov report
-            const octocovArtifact = artifacts.data.artifacts.find(artifact => artifact.name === 'octocov-report-json');
+            const octocovArtifact = artifacts.data.artifacts.find(artifact => artifact.name === 'octocov-report');
             if(!octocovArtifact) {
               console.log('octocov report not found');
               return;
