@@ -89,11 +89,11 @@ jobs:
                   head_sha: context.payload.pull_request.head.sha,
                   status: 'completed',
                   conclusion: 'success',
+                  details_url: artifactDownloadUrl,
                   output: {
                       title: 'Octocov Report',
                       summary: 'Octocov Report is available',
                       text: 'Octocov Report is available at ' + artifactDownloadUrl
-                      details_url: artifactDownloadUrl
                   }
               });
 
