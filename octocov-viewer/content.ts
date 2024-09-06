@@ -17,7 +17,7 @@ const storage = {
   },
 }
 type JSONValue = string | number | boolean | null | { [key: string]: JSONValue } | JSONValue[] | Octocov;
-const cacheFn = async <R extends JSONValue | Octocov>(key: string, fn: () => Promise<R>): Promise<R> => {
+const cacheFn = async <R extends JSONValue | Octocov[]>(key: string, fn: () => Promise<R>): Promise<R> => {
   const value = storage.get(key)
   if (value) {
     return value
@@ -25,6 +25,10 @@ const cacheFn = async <R extends JSONValue | Octocov>(key: string, fn: () => Pro
   const newValue = await fn()
   if (!newValue) {
     return;
+  }
+  // ignore empty array
+  if (Array.isArray(newValue) && newValue.length === 0) {
+    return [] as R;
   }
   storage.set(key, newValue)
   return newValue
@@ -34,11 +38,6 @@ type PullRequestContext = {
   owner: string;
   repo: string;
   prNumber: number;
-}
-type OnPullRequestPageOptions = {
-  context: PullRequestContext;
-  coverageWorkflowPattern: RegExp;
-  artifactNamePattern: RegExp;
 }
 /**
  * Download Octocov report and extract it and parse it
@@ -88,30 +87,36 @@ const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
   const statusLinks = statusDetailsHTML.querySelectorAll<HTMLAnchorElement>(".status-actions[href]");
   // https://github.com/azu/octocov-viewer/actions/runs/10713070183/artifacts/1894254504
   const artifactUrlPattern = /https:\/\/github.com\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/actions\/runs\/(?<runId>\d+)\/artifacts\/(?<artifactId>\d+)/;
-  const artifactUrl = Array.from(statusLinks).find((link) => {
+  const artifactUrls = Array.from(statusLinks).filter((link) => {
     // "octocov-report" is a search keyword
     // user need to set this keyword in the status context
     return link.ariaLabel.includes(octocovReportStatusContextName) && artifactUrlPattern.test(link.href);
-  }) as HTMLAnchorElement | undefined;
-  if (artifactUrl) {
-    return artifactUrl.href;
+  }) as HTMLAnchorElement[]
+  console.info("commit status: artifactUrls", artifactUrls);
+  const hasCommitArtifactUrl = artifactUrls.length > 0;
+  if (hasCommitArtifactUrl) {
+    return artifactUrls.map(url => url.href);
   }
   // Get Artifact URL from Pull Request Check
-  if (!artifactUrl) {
-    const checkSuites = statusDetailsHTML.querySelectorAll(".merge-status-item ");
-    for (const checkSuite of Array.from(checkSuites)) {
-      const textContent = checkSuite.textContent;
-      if (!textContent.includes(octocovReportStatusContextName)) {
-        continue;
+  if (!hasCommitArtifactUrl) {
+    const checkSuites = statusDetailsHTML.querySelectorAll(".merge-status-item");
+    const artifactUrls = Array.from(checkSuites).flatMap((checkSuite) => {
+      const isOctocov = checkSuite.textContent.includes(octocovReportStatusContextName) && artifactUrlPattern.test(checkSuite.textContent);
+      if (!isOctocov) {
+        return [];
       }
       const match = checkSuite.textContent.match(artifactUrlPattern);
-      if (match) {
-        return match[0];
+      if (!match) {
+        return []
       }
+      return [match[0]];
+    });
+    if (artifactUrls.length > 0) {
+      return artifactUrls;
     }
   }
   console.info("Not found artifact url");
-  return undefined;
+  return [];
 }
 
 const getCommitShaInPullRequestFilesPage = (): string | undefined => {
@@ -154,6 +159,11 @@ function highlightLine(lineElementP: HTMLElement, lineNumber: number, status: "c
   if (!lineNumberElement) {
     return;
   }
+  // skip if already marked
+  if (lineNumberElement.dataset.octocovStatus) {
+    return;
+  }
+  lineNumberElement.dataset.octocovStatus = status;
   // x mark if uncovered
   // ✓ mark if covered
   // ? mark if unknown
@@ -176,19 +186,15 @@ function highlightLine(lineElementP: HTMLElement, lineNumber: number, status: "c
  * @param {Element} element
  * @param {string} filePath
  */
-function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string) {
+function markElementWithCoverage(octocov: Octocov, element: HTMLElement, filePath: string) {
   // 2nd column is line number
   const lineElements = Array.from(element.querySelectorAll("tr > [data-line-number]:nth-child(2):not(.blob-num-deletion)")) as HTMLElement[];
-  const visibleLines = Array.from(lineElements, (lineElement) => {
+  const visibleLines = lineElements.map((lineElement) => {
     return Number.parseInt(lineElement.dataset.lineNumber, 10);
   });
   const coveredLines = visibleLines.map((lineNumber) => {
     return coverageLineNumber(octocov, filePath, lineNumber);
   });
-  console.log({
-    filePath,
-    coveredLines
-  })
   lineElements.forEach((lineElement, index) => {
     const parentLineElement = lineElement.parentElement;
     const status = coveredLines[index];
@@ -199,34 +205,37 @@ function iterateFile(octocov: Octocov, element: HTMLElement, filePath: string) {
 type OnPullRequestFilesPageResult = {
   status: "marked" | "no-marked" | "not-found" | "error";
 }
-const fetchOctocovJSON = async (context: PullRequestContext): Promise<Octocov | null> => {
+const fetchOctocovJSONs = async (context: PullRequestContext): Promise<Octocov[]> => {
   const commitSha = getCommitShaInPullRequestFilesPage();
   if (!commitSha) {
     console.info("Not found commitSha");
     return null;
   }
   console.info("commitSha", commitSha);
-  const octocovReportUrl = await cacheFn(`${commitSha}:octocovReportUrl`, () => fetchOctocovReportUrl({
+  const octocovReportUrls = await cacheFn(`${commitSha}:octocovReportUrl`, () => fetchOctocovReportUrl({
     context,
     commitSha,
   }));
-  if (!octocovReportUrl) {
+  if (octocovReportUrls.length === 0) {
     console.info("Not found octocovReportUrl");
     return null;
   }
-  console.info("octocovReportUrl", octocovReportUrl);
-  const octocovJSON = await cacheFn(`${commitSha}:octocovJSON`, () => downloadOctocovReport(octocovReportUrl));
-  if (!octocovJSON) {
+  console.info("octocovReportUrls", octocovReportUrls);
+  const octocovJSONs = await cacheFn(`${commitSha}:octocovJSON`, async () => {
+    return await Promise.all(octocovReportUrls.map((octocovReportUrl) => {
+      return downloadOctocovReport(octocovReportUrl);
+    }));
+  });
+  if (!octocovJSONs) {
     console.info("Not found octocovJSON");
     return null;
   }
-  console.info("octocovJSON", octocovJSON);
-  return octocovJSON;
+  console.info("octocovJSON", octocovJSONs);
+  return octocovJSONs;
 }
 
 (async function main() {
   // checked set for file path
-  const checkSet = new Set<string>();
   const highlightElement = (octocovJSON: Octocov) => {
     const targetFileElement = Array.from(document.querySelectorAll("[data-tagsearch-path]")) as HTMLElement[];
     if (targetFileElement.length === 0) {
@@ -240,17 +249,13 @@ const fetchOctocovJSON = async (context: PullRequestContext): Promise<Octocov | 
     });
     targetFilePaths.forEach((filePath, index) => {
       console.info("highlight filePath", filePath);
-      if (checkSet.has(filePath)) {
-        return;
-      }
-      iterateFile(octocovJSON, targetFileElement[index], filePath);
-      checkSet.add(filePath);
+      markElementWithCoverage(octocovJSON, targetFileElement[index], filePath);
     });
     return {
       status: "marked"
     };
   }
-  const fetchOctocovJsonFromPRFile = async () => {
+  const fetchOctocovJsonsFromPRFile = async () => {
     const url = new URL(location.href);
     const prMatch = url.pathname.match(/\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/pull\/(?<prNumber>\d+)\/files/);
     console.log({
@@ -261,25 +266,29 @@ const fetchOctocovJSON = async (context: PullRequestContext): Promise<Octocov | 
     }
     const { owner, repo, prNumber } = prMatch.groups;
     const context = { owner, repo, prNumber: Number(prNumber) };
-    return fetchOctocovJSON(context)
+    return fetchOctocovJSONs(context)
   }
   // initial
-  let octocovJSON: Octocov | null = null;
-  octocovJSON = await fetchOctocovJsonFromPRFile();
-  if (octocovJSON) {
-    console.log("initial highlight", octocovJSON);
-    highlightElement(octocovJSON);
+  let octocovJSONs: Octocov[] = [];
+  octocovJSONs = await fetchOctocovJsonsFromPRFile();
+  if (octocovJSONs) {
+    console.log("initial highlight", octocovJSONs);
+    for (const octocovJSON of octocovJSONs) {
+      highlightElement(octocovJSON);
+    }
   }
   // watch url change
   let prevUrl = window.location.href;
   setInterval(async () => {
     if (prevUrl !== window.location.href) {
       prevUrl = window.location.href;
-      octocovJSON = await fetchOctocovJsonFromPRFile();
+      octocovJSONs = await fetchOctocovJsonsFromPRFile();
     }
-    if (octocovJSON) {
-      console.log("watch highlight", octocovJSON);
-      highlightElement(octocovJSON);
+    if (octocovJSONs) {
+      console.log("watch highlight", octocovJSONs);
+      for (const octocovJSON of octocovJSONs) {
+        highlightElement(octocovJSON);
+      }
     }
   }, 1000);
 })();
