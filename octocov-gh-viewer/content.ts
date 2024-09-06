@@ -278,6 +278,7 @@ const fetchOctocovJSON = async (context: PullRequestContext): Promise<Octocov | 
       octocovJSON = await fetchOctocovJsonFromPRFile();
     }
     if (octocovJSON) {
+      console.log("watch highlight", octocovJSON);
       highlightElement(octocovJSON);
     }
   }, 1000);
