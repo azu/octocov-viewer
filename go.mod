@@ -1,3 +1,3 @@
-module github.com/azu/octocov-gh-viewer
+module github.com/azu/octocov-viewer
 
 go 1.21.4

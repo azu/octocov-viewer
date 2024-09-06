@@ -70,7 +70,7 @@ type OnCommitShaOptions = {
   commitSha: string;
 }
 const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
-  // e.g. https://github.com/azu/octocov-gh-viewer/commit/178c452f4136e7019129a39be8186157892882e9/status-details
+  // e.g. https://github.com/azu/octocov-viewer/commit/178c452f4136e7019129a39be8186157892882e9/status-details
   // extract status details and get artifact url
   const { owner, repo, prNumber } = options.context
   const checkFragmentUrl = `https://github.com/${owner}/${repo}/commit/${options.commitSha}/status-details`;
@@ -86,7 +86,7 @@ const fetchOctocovReportUrl = async (options: OnCommitShaOptions) => {
   const octocovReportStatusContextName = "octocov-report";
   // Get Artifact URL from Commit Status Link
   const statusLinks = statusDetailsHTML.querySelectorAll<HTMLAnchorElement>(".status-actions[href]");
-  // https://github.com/azu/octocov-gh-viewer/actions/runs/10713070183/artifacts/1894254504
+  // https://github.com/azu/octocov-viewer/actions/runs/10713070183/artifacts/1894254504
   const artifactUrlPattern = /https:\/\/github.com\/(?<owner>[^/]+)\/(?<repo>[^/]+)\/actions\/runs\/(?<runId>\d+)\/artifacts\/(?<artifactId>\d+)/;
   const artifactUrl = Array.from(statusLinks).find((link) => {
     // "octocov-report" is a search keyword

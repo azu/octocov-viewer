@@ -38,10 +38,10 @@ jobs:
           script: |
             const fs = require('node:fs');
             const report = require('./report.json');
-            // .coverage.files.file replace "github.com/azu/octocov-gh-viewer" -> ""
+            // .coverage.files.file replace "github.com/azu/octocov-viewer" -> ""
             report.coverage.files.forEach((file) => {
               // path/to/file.go
-              file.__relativePathFromRoot__ = file.file.replace("github.com/azu/octocov-gh-viewer/", "");
+              file.__relativePathFromRoot__ = file.file.replace("github.com/azu/octocov-viewer/", "");
             });
             fs.writeFileSync('./octocov-report-viewer.json', JSON.stringify(report, null, 2));
       - name: Upload Artifact

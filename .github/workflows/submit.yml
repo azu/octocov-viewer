@@ -25,10 +25,10 @@ jobs:
           cache: "pnpm"
       - name: Build the extension
         run: pnpm build
-        working-directory: ./octocov-gh-viewer
+        working-directory: ./octocov-viewer
       - name: Package the extension into a zip artifact
         run: pnpm package
-        working-directory: ./octocov-gh-viewer
+        working-directory: ./octocov-viewer
 #      - name: Browser Platform Publish
 #        uses: PlasmoHQ/bpp@v3
 #        with:

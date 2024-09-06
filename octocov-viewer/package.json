@@ -1,6 +1,6 @@
 {
-  "name": "octocov-gh-viewer",
-  "displayName": "Octocov gh viewer",
+  "name": "octocov-viewer",
+  "displayName": "Octocov viewer for GitHub",
   "version": "0.0.1",
   "description": "Octocov Coverage Viewer on GitHub",
   "author": "Plasmo Corp. <foss@plasmo.com>",
